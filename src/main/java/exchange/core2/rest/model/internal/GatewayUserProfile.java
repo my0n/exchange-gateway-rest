@@ -126,6 +126,17 @@ public class GatewayUserProfile {
         notifier.accept(gatewayOrder);
     }
 
+    public synchronized void reduceOrder(long orderId, long size, Consumer<GatewayOrder> notifier) {
+        GatewayOrder gatewayOrder = openOrders.get(orderId);
+        ordersHistory.put(orderId, gatewayOrder);
+        long newSize = gatewayOrder.getSize() - size;
+        if (gatewayOrder.getFilled() >= newSize) { // TODO reduced below filled?
+            gatewayOrder.setState(GatewayOrderState.CANCELLED);
+        } else {
+            gatewayOrder.setSize(newSize);
+        }
+        notifier.accept(gatewayOrder);
+    }
 
     public synchronized void updateOrderPrice(long orderId, BigDecimal newPrice, Consumer<GatewayOrder> notifier) {
         GatewayOrder gatewayOrder = openOrders.get(orderId);

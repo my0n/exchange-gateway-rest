@@ -63,7 +63,7 @@ public class SyncTradeAccountApiController {
 
         log.debug("{}", reportResult);
 
-        if (reportResult.getStatus() == SingleUserReportResult.ExecutionStatus.OK) {
+        if (reportResult.getQueryExecutionStatus() == SingleUserReportResult.QueryExecutionStatus.OK) {
 
             final List<RestApiOrder> activeOrders = new ArrayList<>();
 
@@ -88,7 +88,7 @@ public class SyncTradeAccountApiController {
                         .build()));
             });
 
-            final IntLongHashMap profileAccounts = reportResult.getUserProfile().accounts;
+            final IntLongHashMap profileAccounts = reportResult.getAccounts();
 
             final List<RestApiAccountState> accounts = new ArrayList<>(profileAccounts.size());
             profileAccounts.forEachKeyValue((assetId, balance) -> {

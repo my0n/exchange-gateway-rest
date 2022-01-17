@@ -34,7 +34,6 @@ public class GatewayOrder {
 
     private final int userCookie;
 
-    private final long size;
     private final OrderAction action;
     private final OrderType orderType;
 
@@ -43,6 +42,9 @@ public class GatewayOrder {
     // mutable fields
 
     private final List<GatewayDeal> deals = new ArrayList<>();
+
+    @Setter
+    private long size;
 
     @Setter
     private BigDecimal price;

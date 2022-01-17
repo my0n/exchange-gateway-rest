@@ -94,14 +94,15 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
 
         // TODO
 
-        if (cmd.command == OrderCommandType.BINARY_DATA) {
+        if (cmd.command == OrderCommandType.BINARY_DATA_COMMAND
+            || cmd.command == OrderCommandType.BINARY_DATA_QUERY) {
             // ignore binary commands further
             return;
         }
 
         final GatewaySymbolSpec symbolSpec = gatewayState.getSymbolSpec(cmd.symbol);
 
-        // activate order (dont send update because placing is sync)
+        // activate order (don't send update because placing is sync)
         if (cmd.command == OrderCommandType.PLACE_ORDER && cmd.resultCode == CommandResultCode.SUCCESS) {
             final GatewayUserProfile userProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
             userProfile.activateOrder(cmd.orderId);
@@ -128,16 +129,16 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
                 final BigDecimal tradePrice = ArithmeticHelper.fromLongPrice(evt.price, symbolSpec);
 
                 // update taker's profile
-                final GatewayUserProfile takerProfile = gatewayState.getOrCreateUserProfile(evt.activeOrderUid);
+                final GatewayUserProfile takerProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
                 takerProfile.tradeOrder(
-                        evt.activeOrderId,
+                        cmd.orderId,
                         evt.size,
                         tradePrice,
                         MatchingRole.TAKER,
-                        evt.timestamp,
+                        cmd.timestamp,
                         evt.matchedOrderId,
                         evt.matchedOrderUid,
-                        order -> sendOrderUpdate(evt.activeOrderUid, order));
+                        order -> sendOrderUpdate(cmd.uid, order));
 
                 // update maker's profile
                 final GatewayUserProfile makerProfile = gatewayState.getOrCreateUserProfile(evt.matchedOrderUid);
@@ -146,21 +147,27 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
                         evt.size,
                         tradePrice,
                         MatchingRole.MAKER,
-                        evt.timestamp,
-                        evt.activeOrderId,
-                        evt.activeOrderUid,
+                        cmd.timestamp,
+                        cmd.orderId,
+                        cmd.uid,
                         order -> sendOrderUpdate(evt.matchedOrderUid, order));
 
                 // todo aggregate ticks having same price
-                ticks.add(new TickRecord(tradePrice, evt.size, evt.timestamp, evt.activeOrderAction));
+                ticks.add(new TickRecord(tradePrice, evt.size, cmd.timestamp, cmd.action));
 
-            } else if (evt.eventType == MatcherEventType.REJECTION) {
-                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(evt.activeOrderUid);
-                profile.rejectOrder(evt.activeOrderId, order -> sendOrderUpdate(evt.activeOrderUid, order));
+            } else if (evt.eventType == MatcherEventType.REJECT) {
+                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                profile.rejectOrder(
+                        cmd.orderId,
+                        order -> sendOrderUpdate(cmd.uid, order));
 
-            } else if (evt.eventType == MatcherEventType.CANCEL) {
-                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(evt.activeOrderUid);
-                profile.cancelOrder(evt.activeOrderId, order -> sendOrderUpdate(evt.activeOrderUid, order));
+            } else if (evt.eventType == MatcherEventType.REDUCE) {
+                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                profile.reduceOrder(
+                        cmd.orderId,
+                        evt.size,
+                        order -> sendOrderUpdate(cmd.uid, order));
+
             }
         }
 
@@ -208,14 +215,13 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
         cmd.processMatcherEvents(evt -> {
             if (evt.eventType == MatcherEventType.TRADE) {
 
-                MatchingRole role = evt.activeOrderId == cmd.orderId ? MatchingRole.TAKER : MatchingRole.MAKER;
-                tradeRecords.add(NewTradeRecord.builder().filledSize(evt.size).fillPrice(evt.price).matchingRole(role).build());
+                tradeRecords.add(NewTradeRecord.builder().filledSize(evt.size).fillPrice(evt.price).matchingRole(MatchingRole.TAKER).build());
 
-            } else if (evt.eventType == MatcherEventType.CANCEL) {
+            } else if (evt.eventType == MatcherEventType.REDUCE) {
 
                 tradeRecords.add(ReduceRecord.builder().reducedSize(evt.size).build());
 
-            } else if (evt.eventType == MatcherEventType.REJECTION) {
+            } else if (evt.eventType == MatcherEventType.REJECT) {
 
                 tradeRecords.add(RejectionRecord.builder().rejectedSize(evt.size).build());
 
@@ -250,7 +256,7 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
             return null;
         }
 
-        log.debug("MARKET DATA: " + cmd.marketData.dumpOrderBook());
+        //log.debug("MARKET DATA: " + cmd.marketData.dumpOrderBook());
 
         L2MarketData marketData = cmd.marketData;
         OrderBookEvent orderBook = new OrderBookEvent(
