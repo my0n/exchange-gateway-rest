@@ -67,6 +67,7 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
     public void accept(OrderCommand cmd, long seq) {
         log.debug("seq={} EVENT CMD: {}", seq, cmd);
 
+        try {
 //        processData(seq, cmd);
 
 //        final CommandResultCode resultCode = cmd.resultCode;
@@ -90,97 +91,100 @@ public class CommandEventsRouter implements ObjLongConsumer<OrderCommand> {
 //
 //        resp.json(response).done();
 
-        // processing events in original order
+            // processing events in original order
 
-        // TODO
+            // TODO
 
-        if (cmd.command == OrderCommandType.BINARY_DATA_COMMAND
-            || cmd.command == OrderCommandType.BINARY_DATA_QUERY) {
-            // ignore binary commands further
-            return;
-        }
-
-        final GatewaySymbolSpec symbolSpec = gatewayState.getSymbolSpec(cmd.symbol);
-
-        // activate order (don't send update because placing is sync)
-        if (cmd.command == OrderCommandType.PLACE_ORDER && cmd.resultCode == CommandResultCode.SUCCESS) {
-            final GatewayUserProfile userProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
-            userProfile.activateOrder(cmd.orderId);
-        }
-
-        // update order price
-        if (cmd.command == OrderCommandType.MOVE_ORDER && cmd.resultCode == CommandResultCode.SUCCESS) {
-            final GatewayUserProfile userProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
-            userProfile.updateOrderPrice(
-                    cmd.orderId,
-                    ArithmeticHelper.fromLongPrice(cmd.price, symbolSpec),
-                    order -> sendOrderUpdate(cmd.uid, order));
-        }
-
-        List<MatcherTradeEvent> matcherTradeEvents = cmd.extractEvents();
-
-        List<TickRecord> ticks = new ArrayList<>();
-
-        for (MatcherTradeEvent evt : matcherTradeEvents) {
-            log.debug("INTERNAL EVENT: " + evt);
-            if (evt.eventType == MatcherEventType.TRADE) {
-
-                // resolve trade price
-                final BigDecimal tradePrice = ArithmeticHelper.fromLongPrice(evt.price, symbolSpec);
-
-                // update taker's profile
-                final GatewayUserProfile takerProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
-                takerProfile.tradeOrder(
-                        cmd.orderId,
-                        evt.size,
-                        tradePrice,
-                        MatchingRole.TAKER,
-                        cmd.timestamp,
-                        evt.matchedOrderId,
-                        evt.matchedOrderUid,
-                        order -> sendOrderUpdate(cmd.uid, order));
-
-                // update maker's profile
-                final GatewayUserProfile makerProfile = gatewayState.getOrCreateUserProfile(evt.matchedOrderUid);
-                makerProfile.tradeOrder(
-                        evt.matchedOrderId,
-                        evt.size,
-                        tradePrice,
-                        MatchingRole.MAKER,
-                        cmd.timestamp,
-                        cmd.orderId,
-                        cmd.uid,
-                        order -> sendOrderUpdate(evt.matchedOrderUid, order));
-
-                // todo aggregate ticks having same price
-                ticks.add(new TickRecord(tradePrice, evt.size, cmd.timestamp, cmd.action));
-
-            } else if (evt.eventType == MatcherEventType.REJECT) {
-                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
-                profile.rejectOrder(
-                        cmd.orderId,
-                        order -> sendOrderUpdate(cmd.uid, order));
-
-            } else if (evt.eventType == MatcherEventType.REDUCE) {
-                final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
-                profile.reduceOrder(
-                        cmd.orderId,
-                        evt.size,
-                        order -> sendOrderUpdate(cmd.uid, order));
-
+            if (cmd.command == OrderCommandType.BINARY_DATA_COMMAND
+                    || cmd.command == OrderCommandType.BINARY_DATA_QUERY) {
+                // ignore binary commands further
+                return;
             }
-        }
 
-        if (!ticks.isEmpty()) {
-            gatewayState.addTicks(symbolSpec.symbolCode, ticks);
+            final GatewaySymbolSpec symbolSpec = gatewayState.getSymbolSpec(cmd.symbol);
 
-            ticks.forEach(tick -> {
-                final StompApiTick apiTick = new StompApiTick(tick.getPrice(), tick.getSize(), tick.getTimestamp());
-                simpMessagingTemplate.convertAndSend(STOMP_TOPIC_TICKS_PREFIX + symbolSpec.symbolCode, apiTick);
-                log.debug("#### Sent tick {} {}", STOMP_TOPIC_TICKS_PREFIX + symbolSpec.symbolCode, apiTick);
+            // activate order (don't send update because placing is sync)
+            if (cmd.command == OrderCommandType.PLACE_ORDER && cmd.resultCode == CommandResultCode.SUCCESS) {
+                final GatewayUserProfile userProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                userProfile.activateOrder(cmd.orderId);
+            }
+
+            // update order price
+            if (cmd.command == OrderCommandType.MOVE_ORDER && cmd.resultCode == CommandResultCode.SUCCESS) {
+                final GatewayUserProfile userProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                userProfile.updateOrderPrice(
+                        cmd.orderId,
+                        ArithmeticHelper.fromLongPrice(cmd.price, symbolSpec),
+                        order -> sendOrderUpdate(cmd.uid, order));
+            }
+
+            List<MatcherTradeEvent> matcherTradeEvents = cmd.extractEvents();
+
+            List<TickRecord> ticks = new ArrayList<>();
+
+            for (MatcherTradeEvent evt : matcherTradeEvents) {
+                log.debug("INTERNAL EVENT: " + evt);
+                if (evt.eventType == MatcherEventType.TRADE) {
+
+                    // resolve trade price
+                    final BigDecimal tradePrice = ArithmeticHelper.fromLongPrice(evt.price, symbolSpec);
+
+                    // update taker's profile
+                    final GatewayUserProfile takerProfile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                    takerProfile.tradeOrder(
+                            cmd.orderId,
+                            evt.size,
+                            tradePrice,
+                            MatchingRole.TAKER,
+                            cmd.timestamp,
+                            evt.matchedOrderId,
+                            evt.matchedOrderUid,
+                            order -> sendOrderUpdate(cmd.uid, order));
+
+                    // update maker's profile
+                    final GatewayUserProfile makerProfile = gatewayState.getOrCreateUserProfile(evt.matchedOrderUid);
+                    makerProfile.tradeOrder(
+                            evt.matchedOrderId,
+                            evt.size,
+                            tradePrice,
+                            MatchingRole.MAKER,
+                            cmd.timestamp,
+                            cmd.orderId,
+                            cmd.uid,
+                            order -> sendOrderUpdate(evt.matchedOrderUid, order));
+
+                    // todo aggregate ticks having same price
+                    ticks.add(new TickRecord(tradePrice, evt.size, cmd.timestamp, cmd.action));
+
+                } else if (evt.eventType == MatcherEventType.REJECT) {
+                    final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                    profile.rejectOrder(
+                            cmd.orderId,
+                            order -> sendOrderUpdate(cmd.uid, order));
+
+                } else if (evt.eventType == MatcherEventType.REDUCE) {
+                    final GatewayUserProfile profile = gatewayState.getOrCreateUserProfile(cmd.uid);
+                    profile.reduceOrder(
+                            cmd.orderId,
+                            evt.size,
+                            order -> sendOrderUpdate(cmd.uid, order));
+
+                }
+            }
+
+            if (!ticks.isEmpty()) {
+                gatewayState.addTicks(symbolSpec.symbolCode, ticks);
+
+                ticks.forEach(tick -> {
+                    final StompApiTick apiTick = new StompApiTick(tick.getPrice(), tick.getSize(), tick.getTimestamp());
+                    simpMessagingTemplate.convertAndSend(STOMP_TOPIC_TICKS_PREFIX + symbolSpec.symbolCode, apiTick);
+                    log.debug("#### Sent tick {} {}", STOMP_TOPIC_TICKS_PREFIX + symbolSpec.symbolCode, apiTick);
 //                simpMessagingTemplate.convertAndSend("abc", "symbol123");
 
-            });
+                });
+            }
+        } catch (Exception ex) {
+            log.error("encountered error", ex);
         }
     }
 
